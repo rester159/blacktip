@@ -21,8 +21,14 @@
     "dist",
     "README.md",
     "AGENTS.md",
+    "CHANGELOG.md",
     "LICENSE",
-    "examples"
+    "examples",
+    "docs",
+    "native/tls-client/main.go",
+    "native/tls-client/go.mod",
+    "native/tls-client/go.sum",
+    "scripts"
   ],
   "scripts": {
     "build": "tsc",
