@@ -1,0 +1,62 @@
+{
+  "name": "blacktip",
+  "version": "0.1.0",
+  "description": "Stealth browser instrument for AI agents. Real Chrome + patchright CDP stealth + human-calibrated behavioral simulation. Every action is indistinguishable from a human.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rester159/blacktip.git"
+  },
+  "homepage": "https://github.com/rester159/blacktip#readme",
+  "bugs": {
+    "url": "https://github.com/rester159/blacktip/issues"
+  },
+  "bin": {
+    "blacktip": "dist/cli.js",
+    "bt": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "AGENTS.md",
+    "LICENSE",
+    "examples"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "serve": "node dist/cli.js serve",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:unit": "vitest run --exclude \"tests/**/*.integration.test.ts\" --exclude \"tests/evaluation/**\"",
+    "test:integration": "vitest run integration",
+    "eval": "vitest run tests/evaluation",
+    "test:watch": "vitest",
+    "lint": "eslint src/",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "browser",
+    "automation",
+    "stealth",
+    "anti-detection",
+    "playwright",
+    "patchright",
+    "headless",
+    "agent"
+  ],
+  "author": "BlackTip Contributors",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "patchright": "^1.59.4"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.3"
+  }
+}

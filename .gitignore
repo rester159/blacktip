@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Build output — rebuilt on publish via prepublishOnly
+dist/
+*.tsbuildinfo
+
+# Runtime artifacts
+shot.png
+*.png
+*.jpg
+*.tgz
+!examples/**/*.png
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Session-internal working files.
+# These contain development notes, test baselines, and internal planning
+# docs that may reference session-specific data. Keeping them out of the
+# public repo. The user-facing documentation is in README.md, AGENTS.md,
+# and examples/.
+planning/
+
+# Downloads / scratch
+.publish-smoke-test/
+downloads/
+tmp/
