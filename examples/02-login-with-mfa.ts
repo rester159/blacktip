@@ -8,7 +8,7 @@
  * Run with: npx tsx examples/02-login-with-mfa.ts
  */
 
-import { BlackTip } from 'blacktip';
+import { BlackTip } from '@rester159/blacktip';
 import * as readline from 'node:readline/promises';
 
 async function main(): Promise<void> {

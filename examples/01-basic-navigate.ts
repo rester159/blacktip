@@ -4,7 +4,7 @@
  * Run with: npx tsx examples/01-basic-navigate.ts
  */
 
-import { BlackTip } from 'blacktip';
+import { BlackTip } from '@rester159/blacktip';
 
 async function main(): Promise<void> {
   const bt = new BlackTip({

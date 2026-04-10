@@ -43,7 +43,7 @@ BlackTip's architecture:
 ## Install
 
 ```bash
-npm install blacktip
+npm install @rester159/blacktip
 npx patchright install chrome   # install the Chromium backend patchright uses
 ```
 
@@ -52,7 +52,7 @@ Or pin to a local checkout during development:
 ```json
 {
   "dependencies": {
-    "blacktip": "link:../blacktip"
+    "@rester159/blacktip": "link:../blacktip"
   }
 }
 ```
@@ -64,7 +64,7 @@ Run `npm install` once, then any change you make to BlackTip's compiled `dist/` 
 ## Quick start
 
 ```typescript
-import { BlackTip } from 'blacktip';
+import { BlackTip } from '@rester159/blacktip';
 
 const bt = new BlackTip({
   logLevel: 'info',
@@ -184,7 +184,7 @@ npm run dev   # alias for tsc --watch
 # In the consuming app's package.json
 {
   "dependencies": {
-    "blacktip": "link:../blacktip"
+    "@rester159/blacktip": "link:../blacktip"
   }
 }
 
