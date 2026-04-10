@@ -39,6 +39,37 @@ export interface BlackTipConfig {
    * unset for offline / air-gapped use.
    */
   requireResidentialIp?: boolean | 'warn' | 'throw';
+  /**
+   * TLS rewriting (v0.5.0). When set to `'all'`, every browser request is
+   * intercepted via Chrome DevTools Protocol's `Fetch.enable` and forwarded
+   * through the Go-based `bogdanfinn/tls-client` daemon, which makes the
+   * upstream call with a real Chrome TLS ClientHello, real H2 frame
+   * settings, and real H2 frame order. The browser never opens an upstream
+   * TCP connection — all its HTTP is fulfilled by the daemon.
+   *
+   * This restores cross-platform UA spoofing (run on Linux, present as
+   * Windows or macOS — the daemon controls every header on the wire) and
+   * gives total fingerprint control without the cert-installation hell of
+   * a TCP-level MITM proxy.
+   *
+   * Tradeoffs:
+   *   - WebSocket upgrades cannot be intercepted via Fetch and leak
+   *     Chrome's native TLS. Mitigation: BlackTip auto-disables QUIC/HTTP3
+   *     (`--disable-quic`) and the rewriter logs WS leaks for awareness.
+   *   - Streaming/large response bodies are fully buffered (Fetch.fulfill
+   *     takes a complete body). Bad for video; fine for HTML pages.
+   *   - 5–10ms round-trip overhead per request. ~250–500ms added on a
+   *     typical page with 50 subresources.
+   *
+   * Requires the Go daemon binary at `native/tls-client/blacktip-tls[.exe]`
+   * — see `docs/tls-side-channel.md` for build instructions. If the daemon
+   * binary is missing, launch will throw rather than silently falling back.
+   *
+   * Set to `'off'` (default) for normal operation, `'all'` for full
+   * rewriting. Future versions may add `'selective:<domain-glob>'` for
+   * per-domain rewriting.
+   */
+  tlsRewriting?: 'off' | 'all';
 }
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';

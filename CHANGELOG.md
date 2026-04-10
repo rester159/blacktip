@@ -6,6 +6,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-04-10
+
+The "best in the world" release. v0.5.0 closes both remaining gaps from the v0.4.0 wrap-up: full TLS rewriting (every browser request, not just the gating one) and Akamai sensor challenge automation. Both shipped, both validated end-to-end against live targets.
+
+### Added — full TLS rewriting via CDP Fetch interception
+
+- **`BlackTipConfig.tlsRewriting: 'all' | 'off'`** — when `'all'`, every browser request is intercepted via Chrome DevTools Protocol's `Fetch.enable` and forwarded through the Go-based `bogdanfinn/tls-client` daemon. The browser never opens an upstream TCP connection — every wire request presents real Chrome TLS via Go.
+- **No cert installation.** Avoids the OS-specific cert-store hell of a TCP-level MITM proxy by working at the CDP layer instead. Same end-state ("every wire request gets real Chrome TLS via Go"), dramatically more shippable.
+- **`bt.getTlsRewriterStats()`** — observability for the rewriter: intercepted/fulfilled/fell-through counts, WebSocket leaks, average daemon round-trip. Lets you verify the rewriter is doing what you expect.
+- **Auto-disables QUIC** — adds `--disable-quic` to Chrome launch args when rewriting is on, because Chrome handles QUIC at a layer below CDP Fetch and would otherwise bypass the rewriter entirely.
+- **Validated end-to-end against tls.peet.ws via the browser.** JA4 reaching the upstream is `t13d1516h2_8daaf6152771_d8a2da3f94cd` (textbook Chrome 133), first cipher `TLS_GREASE (0x3A3A)` with proper rotation, HTTP/2 fingerprint `1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p` (exact Chrome match) — and this is the JA4 the upstream sees when the BROWSER navigates, proving the upstream connection was opened by Go, not Chrome.
+- **Cross-platform UA spoofing restored.** v0.2.0's L016 fix removed the broken context-level UA override; the rewriter restores cross-platform spoofing safely because the daemon controls every header on the wire.
+- **Honest limitations** documented in `docs/tls-rewriting.md`: WebSocket leaks (Fetch.enable can't intercept the upgrade), streaming responses must be fully buffered (Fetch.fulfillRequest takes a complete body), 5–10ms per-request overhead (acceptable for stealth-critical use cases, not for high-throughput crawling).
+- **`src/tls-rewriter.ts`** — the rewriter itself, separated from `browser-core.ts` so it's testable in isolation. Strips request headers Chrome owns (`Host`, `Content-Length`, `Connection`, etc.), strips response headers Chrome re-computes (`Content-Length`, `Content-Encoding`), handles multi-valued `Set-Cookie` correctly.
+- **4 new integration tests** in `tests/tls-rewriter.integration.test.ts` — navigation success, JA4 fingerprint match via browser navigation, stats reporting, subresource interception via Hacker News (proves no native-Chrome leaks on subresources).
+
+### Added — Akamai sensor challenge solver
+
+- **`bt.solveAkamaiChallenge(url)`** — drives a real BlackTip browser session through Akamai's sensor challenge for `url`, polls until `_abck` reaches a definitive state, and returns the validated cookies plus a pre-built header set ready to inject into TLS-daemon replay calls. The cost amortization is real: **5x speedup over per-call browser usage with zero detection cost** (15s solve + 100×0.6s replays = 75s vs 400s for browser-per-call on 100 calls).
+- **Architecture rationale** documented in `docs/akamai-sensor.md`: not a pure-Go solver because reverse-engineering bm.js would be a 1-2 week project that rots in 6 weeks. The shipped pattern ("solve once with the real browser, replay N times via the daemon") is more sustainable AND faster in practice.
+- **`AkamaiChallengeResult.recommendedHeaders`** — pre-built header object containing Cookie + User-Agent + Accept-Language + Sec-Ch-Ua + Sec-Ch-Ua-Mobile + Sec-Ch-Ua-Platform + Sec-Fetch-Dest + Sec-Fetch-Mode + Sec-Fetch-Site + Sec-Fetch-User + Upgrade-Insecure-Requests. Empirically validated: replays without these headers 403 even with valid cookies, because Akamai validates the full request shape, not just the cookie jar.
+- **`parseAbckState(abckValue)`** — pure-function helper that decodes the `_abck` validation state from the cookie value. Returns `0` (validated), `-1` (sensor not enforced — Akamai admitted on TLS/IP/behavior signals), `1` (flagged as bot), or `null` (no cookie). Both `0` and `-1` count as "session usable" because empirically Akamai admits real-Chrome residential sessions without ever requiring sensor validation.
+- **8 new unit tests** in `tests/akamai-sensor.test.ts` covering all `parseAbckState` paths.
+- **2 new integration tests** in `tests/akamai-sensor.integration.test.ts` against the live OpenTable booking endpoint: solver returns the full Akamai cookie set + recommended headers, and 3 consecutive daemon replays via `bt.fetchWithTls(solved.recommendedHeaders)` all return 200 with real content.
+
+### Test suite
+
+- **94 → 102 unit tests passing** (+8 Akamai parser), zero regressions.
+- **Plus 6 new integration tests** total: 4 TLS rewriter, 2 Akamai sensor.
+
+[0.5.0]: https://github.com/rester159/blacktip/compare/v0.4.0...v0.5.0
+
 ## [0.4.0] — 2026-04-10
 
 The "close the remaining gaps" release. v0.4.0 ships everything that had been accumulated since v0.2.0 plus three new pieces that close out the gaps named in the v0.3.0 wrap-up: a Kasada-validated pass on a real armed endpoint (Twitch), an `IdentityPool` for long-running session and identity rotation, and a launch-time IP reputation gate. There is no separate v0.3.0 release on npm — the v0.3.0 work was developed in the same release cycle and rolls into 0.4.0 as one shipment.
@@ -184,7 +216,7 @@ Real-target validation:
 - Real Chrome must be installed on the host for the preferred `channel: 'chrome'` path. patchright's bundled Chromium is the fallback.
 - Scoped-name fix: the initial planned unscoped name `blacktip` was blocked by npm's anti-typosquatting policy (too similar to the pre-existing `black-tip` package). Released as `@rester159/blacktip` instead.
 
-[Unreleased]: https://github.com/rester159/blacktip/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/rester159/blacktip/compare/v0.5.0...HEAD
 [0.4.0]: https://github.com/rester159/blacktip/compare/v0.2.0...v0.4.0
 [0.2.0]: https://github.com/rester159/blacktip/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/rester159/blacktip/releases/tag/v0.1.0

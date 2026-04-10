@@ -17,6 +17,7 @@ import {
   type AntiBotTestResult,
 } from './diagnostics.js';
 import { TlsSideChannel, type TlsRequest, type TlsResponse } from './tls-side-channel.js';
+import { solveAkamaiChallenge as solveAkamaiChallengeImpl, type AkamaiChallengeResult } from './akamai-sensor.js';
 import type {
   BlackTipConfig,
   ProfileConfig,
@@ -1159,6 +1160,45 @@ export class BlackTip extends EventEmitter {
   async testAgainstAntiBot(url: string): Promise<AntiBotTestResult> {
     this.ensureLaunched();
     return diagnosticsTestAgainstAntiBot(this, url);
+  }
+
+  /**
+   * Return the TLS rewriter stats — intercepted/fulfilled/fell-through
+   * counts, WebSocket leaks, average daemon round-trip. Null when
+   * `BlackTipConfig.tlsRewriting` is `'off'` (the default).
+   *
+   * Use this to verify the rewriter is doing what you expect:
+   *   - `intercepted > 0` confirms requests are being captured
+   *   - `fulfilled === intercepted - webSocketLeaks` confirms no fallthroughs
+   *   - `fellThrough > 0` indicates daemon failures (check daemon stderr)
+   */
+  getTlsRewriterStats() {
+    return this.core.getTlsRewriterStats();
+  }
+
+  /**
+   * Drive this BlackTip session through Akamai's sensor challenge for
+   * `url`, waiting until the `_abck` cookie reaches a validated state.
+   * Returns the validated cookies for injection into other sessions
+   * (TLS daemon flows, IdentityPool snapshots, separate BlackTip
+   * instances).
+   *
+   * This is the v0.5.0 path for "make Akamai-protected API calls from a
+   * sessionless TLS daemon" — solve the challenge once via this method,
+   * cache the cookies, then run hundreds of `bt.fetchWithTls()` calls
+   * with the cached `Cookie` header until the session expires (~1h).
+   *
+   * NOT a pure-Go solver. Real Chrome runs the bm.js. We just centralize
+   * the browser usage to one primitive so the caller doesn't have to
+   * launch a full session per API call. See `docs/akamai-sensor.md` for
+   * the architecture rationale.
+   */
+  async solveAkamaiChallenge(
+    url: string,
+    options?: { timeoutMs?: number; pollIntervalMs?: number; dwellMsBeforePolling?: number },
+  ): Promise<AkamaiChallengeResult> {
+    this.ensureLaunched();
+    return solveAkamaiChallengeImpl(this, url, options);
   }
 
   // ── TLS side-channel (v0.3.0) ──

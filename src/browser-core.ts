@@ -15,6 +15,8 @@ import type {
 import { DeviceProfileManager } from './fingerprint.js';
 import { generateEvasionScripts } from './evasion.js';
 import { Logger } from './logging.js';
+import { TlsSideChannel } from './tls-side-channel.js';
+import { installTlsRewriter, type TlsRewriterStats } from './tls-rewriter.js';
 
 export class BrowserCore extends EventEmitter {
   private browser: Browser | null = null;
@@ -22,6 +24,9 @@ export class BrowserCore extends EventEmitter {
   private pages: Page[] = [];
   private activePageIndex = 0;
   private deviceProfile: DeviceProfile;
+  private tlsRewriterChannel: TlsSideChannel | null = null;
+  private tlsRewriterStats: (() => TlsRewriterStats) | null = null;
+  private tlsRewriterUninstall: (() => Promise<void>) | null = null;
   private config: Required<Pick<BlackTipConfig, 'headless' | 'timeout' | 'locale' | 'timezone' | 'persistent'>> & BlackTipConfig;
   private logger: Logger;
   private profileManager: DeviceProfileManager;
@@ -66,6 +71,14 @@ export class BrowserCore extends EventEmitter {
 
     if (this.config.proxy) {
       launchArgs.push(`--proxy-server=${this.config.proxy}`);
+    }
+
+    // TLS rewriting requires that Chrome NOT short-circuit through HTTP/3
+    // (QUIC), because Chrome handles QUIC at a layer below CDP Fetch and
+    // those requests would bypass the rewriter entirely. Force HTTP/1.1
+    // and HTTP/2 only when rewriting is on.
+    if (this.config.tlsRewriting === 'all') {
+      launchArgs.push('--disable-quic');
     }
 
     // Try system Chrome first, fall back to Playwright's bundled Chromium.
@@ -182,6 +195,27 @@ export class BrowserCore extends EventEmitter {
       await ctx.addInitScript(script);
     }
 
+    // TLS rewriting (v0.5.0). When enabled, every browser request goes
+    // through the bogdanfinn/tls-client daemon via CDP Fetch interception.
+    // The browser never opens an upstream TCP connection — every wire
+    // request presents real Chrome TLS via Go.
+    //
+    // We spawn the daemon here (not in launch's args block) because the
+    // daemon spawn is async and we need the channel before we can install
+    // the route handler. If the daemon binary is missing, this throws
+    // and the launch fails — better to surface the error early than
+    // silently fall back to native TLS that the caller didn't ask for.
+    if (this.config.tlsRewriting === 'all') {
+      this.tlsRewriterChannel = await TlsSideChannel.spawn();
+      const installed = await installTlsRewriter(ctx, {
+        channel: this.tlsRewriterChannel,
+        logger: this.logger,
+      });
+      this.tlsRewriterStats = installed.stats;
+      this.tlsRewriterUninstall = installed.uninstall;
+      this.logger.info('TLS rewriter installed — every request goes through bogdanfinn/tls-client');
+    }
+
     // Set default timeout
     ctx.setDefaultTimeout(this.config.timeout);
 
@@ -226,6 +260,15 @@ export class BrowserCore extends EventEmitter {
   }
 
   async close(): Promise<void> {
+    if (this.tlsRewriterUninstall) {
+      await this.tlsRewriterUninstall().catch(() => undefined);
+      this.tlsRewriterUninstall = null;
+      this.tlsRewriterStats = null;
+    }
+    if (this.tlsRewriterChannel) {
+      await this.tlsRewriterChannel.close().catch(() => undefined);
+      this.tlsRewriterChannel = null;
+    }
     if (this.context) {
       await this.context.close();
       this.context = null;
@@ -237,6 +280,15 @@ export class BrowserCore extends EventEmitter {
     this.pages = [];
     this.activePageIndex = 0;
     this.logger.info('Browser closed');
+  }
+
+  /**
+   * Return the TLS rewriter stats (intercepted, fulfilled, fell-through,
+   * WebSocket leaks, average daemon round-trip). Null when TLS rewriting
+   * is off.
+   */
+  getTlsRewriterStats(): TlsRewriterStats | null {
+    return this.tlsRewriterStats ? this.tlsRewriterStats() : null;
   }
 
   isActive(): boolean {

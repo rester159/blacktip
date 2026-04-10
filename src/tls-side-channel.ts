@@ -39,8 +39,10 @@ export interface TlsRequest {
   url: string;
   method?: string;
   headers?: Record<string, string>;
-  /** Request body as a UTF-8 string (will be base64-encoded for the wire). */
-  body?: string;
+  /** Request body as a UTF-8 string OR raw Buffer. Buffer is required for
+   *  binary uploads (multipart, octet-stream); string is fine for form
+   *  bodies and JSON. Encoded as base64 on the wire. */
+  body?: string | Buffer;
   timeoutMs?: number;
   /** Chrome / Firefox / Safari profile name; defaults to chrome_133. */
   profile?: string;
@@ -48,10 +50,17 @@ export interface TlsRequest {
 
 export interface TlsResponse {
   status: number;
-  /** Headers from the upstream response, lower-cased keys. */
+  /** Headers from the upstream response. Multi-valued — Set-Cookie commonly
+   *  has multiple entries. Header keys preserve the casing the upstream sent. */
   headers: Record<string, string[]>;
-  /** Response body as a UTF-8 string (decoded from the wire's base64). */
+  /** Response body as a UTF-8 string. May be garbage for binary content;
+   *  use `bodyBuffer` for that. Kept as the primary body field for callers
+   *  that just want JSON / HTML. */
   body: string;
+  /** Response body as raw bytes. Use this when the upstream returns binary
+   *  data (images, fonts, video, anything non-UTF-8). The TLS rewriting
+   *  route handler always uses this so subresources don't get mangled. */
+  bodyBuffer: Buffer;
   finalUrl: string;
   durationMs: number;
   /** Cookies parsed from `Set-Cookie` headers, ready to inject via `bt.setCookies()`. */
@@ -221,7 +230,8 @@ export class TlsSideChannel {
     const finalUrl = parsed.finalUrl ?? '';
     const headers = parsed.headers ?? {};
     const bodyB64 = parsed.body ?? '';
-    const body = Buffer.from(bodyB64, 'base64').toString('utf-8');
+    const bodyBuffer = Buffer.from(bodyB64, 'base64');
+    const body = bodyBuffer.toString('utf-8');
 
     // Parse Set-Cookie headers. The header key may be `Set-Cookie`
     // or `set-cookie` depending on the daemon's Go HTTP version.
@@ -240,6 +250,7 @@ export class TlsSideChannel {
       status: parsed.status ?? 0,
       headers,
       body,
+      bodyBuffer,
       finalUrl,
       durationMs: parsed.durationMs,
       cookies,
@@ -254,12 +265,17 @@ export class TlsSideChannel {
   async fetch(req: TlsRequest): Promise<TlsResponse> {
     if (this.closed) throw new Error('TLS daemon is closed');
     const id = `r${this.nextId++}`;
+    let bodyB64 = '';
+    if (req.body != null) {
+      const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body, 'utf-8');
+      bodyB64 = buf.toString('base64');
+    }
     const wire = {
       id,
       url: req.url,
       method: req.method ?? 'GET',
       headers: req.headers ?? {},
-      body: req.body ? Buffer.from(req.body, 'utf-8').toString('base64') : '',
+      body: bodyB64,
       timeoutMs: req.timeoutMs ?? 15000,
       profile: req.profile ?? 'chrome_133',
     };

@@ -39,6 +39,14 @@ export {
 export { TlsSideChannel } from './tls-side-channel.js';
 export type { TlsRequest, TlsResponse, ParsedCookie } from './tls-side-channel.js';
 
+// v0.5.0 — full TLS rewriting via CDP Fetch interception + Go daemon
+export { installTlsRewriter } from './tls-rewriter.js';
+export type { TlsRewriterOptions, TlsRewriterStats } from './tls-rewriter.js';
+
+// v0.5.0 — Akamai sensor challenge solver
+export { solveAkamaiChallenge, parseAbckState } from './akamai-sensor.js';
+export type { AkamaiChallengeResult } from './akamai-sensor.js';
+
 // v0.4.0 — IdentityPool: long-running session and identity rotation
 export { IdentityPool } from './identity-pool.js';
 export type {

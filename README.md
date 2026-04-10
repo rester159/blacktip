@@ -181,8 +181,12 @@ See `AGENTS.md` for the full agent-facing reference, including the decision tree
 | `bt.testAgainstAntiBot(url)` | Multi-vendor probe — detects Akamai, DataDome, Cloudflare, PerimeterX, Imperva, Kasada, Arkose, plus vendor signals on a passing page (v0.2.0) |
 | `bt.fetchWithTls(req)` | Perform an HTTP request via a Go-based `bogdanfinn/tls-client` daemon with a real Chrome TLS ClientHello, H2 frame settings, and frame order. Use for first-request edge gating and cross-platform UA spoofing. Requires the daemon binary at `native/tls-client/` (build with `go build .`) (v0.3.0) |
 | `bt.injectTlsCookies(resp, targetUrl?)` | Inject cookies returned by `fetchWithTls()` into the browser session, filtered by target eTLD+1 (v0.3.0) |
+| `bt.solveAkamaiChallenge(url)` | Solve Akamai's sensor challenge in the browser once, return cookies + recommended headers ready for replay via `fetchWithTls()`. ~5x speedup over per-call browser usage on protected APIs. (v0.5.0) |
+| `bt.getTlsRewriterStats()` | Stats for the TLS rewriter when `tlsRewriting: 'all'` is set — intercepted/fulfilled/fell-through counts, WebSocket leaks, average daemon round-trip. (v0.5.0) |
 
 Plus `IdentityPool` (v0.4.0) for long-running session and identity rotation across many flows. See **[docs/identity-pool.md](docs/identity-pool.md)**.
+
+**`BlackTipConfig.tlsRewriting: 'all'`** (v0.5.0) — when set, every browser request is intercepted via CDP `Fetch.enable` and forwarded through the Go-based `bogdanfinn/tls-client` daemon. The browser never opens an upstream TCP connection — every wire request, including subresources, presents real Chrome TLS via Go. Cross-platform UA spoofing is restored. See **[docs/tls-rewriting.md](docs/tls-rewriting.md)**.
 | `bt.warmSession({sites?, dwellMsRange?})` | Pre-target warm-up — visit normal sites first (v0.2.0) |
 | `bt.serve(port?)` | Start TCP command server |
 
