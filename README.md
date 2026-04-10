@@ -1,5 +1,12 @@
 # BlackTip
 
+[![npm version](https://img.shields.io/npm/v/%40rester159%2Fblacktip.svg?color=cb3837&label=npm)](https://www.npmjs.com/package/@rester159/blacktip)
+[![npm downloads](https://img.shields.io/npm/dm/%40rester159%2Fblacktip.svg?color=cb3837)](https://www.npmjs.com/package/@rester159/blacktip)
+[![license](https://img.shields.io/npm/l/%40rester159%2Fblacktip.svg?color=blue)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/rester159/blacktip?style=social)](https://github.com/rester159/blacktip/stargazers)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Node](https://img.shields.io/node/v/%40rester159%2Fblacktip.svg?color=5fa04e&logo=node.js&logoColor=white)](https://nodejs.org/)
+
 **Stealth browser instrument for AI agents.** Real Chrome + patchright CDP stealth + human-calibrated behavioral simulation. BlackTip is the hands, you (or your agent) are the brain.
 
 BlackTip is not an agent. It does not parse natural language, does not plan, and does not decide what to click. It exposes primitives — `navigate`, `click`, `type`, `scroll`, `screenshot`, `waitForStable` — and wraps every action in human behavior that defeats bot detection.
