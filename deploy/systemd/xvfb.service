@@ -1,0 +1,45 @@
+# /etc/systemd/system/xvfb.service
+#
+# Virtual X framebuffer for headless servers running BlackTip.
+# Creates display :99 with a 1920x1080x24 screen that Chrome renders to.
+# BlackTip-consuming apps reference this display via DISPLAY=:99.
+#
+# Install:
+#   sudo cp deploy/systemd/xvfb.service /etc/systemd/system/xvfb.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now xvfb
+#
+# Verify:
+#   systemctl status xvfb
+#   DISPLAY=:99 xdpyinfo | head -3
+#   # Should print "name of display: :99" and the screen dimensions.
+
+[Unit]
+Description=Xvfb virtual framebuffer for BlackTip (display :99)
+After=network.target
+Before=blacktip.service
+
+[Service]
+Type=simple
+# Runs as a dedicated non-root user for isolation
+User=blacktip
+Group=blacktip
+# -screen: define screen 0 at 1920x1080 with 24-bit color depth
+# -nolisten tcp: don't accept TCP X connections (security)
+# -ac: disable X access control (only the local user can connect)
+ExecStart=/usr/bin/Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp -ac
+Restart=on-failure
+RestartSec=2s
+# Process group — kill the whole tree on stop
+KillMode=process
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# Xvfb needs /tmp/.X11-unix for the socket
+ReadWritePaths=/tmp/.X11-unix
+
+[Install]
+WantedBy=multi-user.target

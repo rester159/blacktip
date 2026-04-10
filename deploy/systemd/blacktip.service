@@ -1,0 +1,82 @@
+# /etc/systemd/system/blacktip.service
+#
+# BlackTip serve-mode instance. Depends on xvfb.service running first
+# so Chrome has a display to render to.
+#
+# Customize WorkingDirectory and ExecStart for your project:
+#   - WorkingDirectory should point to your BlackTip-consuming app's root
+#   - ExecStart can run BlackTip's own CLI (for testing) or your app's
+#     Node entrypoint (for production)
+#
+# Install:
+#   sudo cp deploy/systemd/blacktip.service /etc/systemd/system/blacktip.service
+#   # Edit /etc/systemd/system/blacktip.service to set paths for your project
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now blacktip
+#
+# Logs:
+#   journalctl -u blacktip -f
+#   journalctl -u blacktip --since "1 hour ago"
+
+[Unit]
+Description=BlackTip serve mode (stealth browser instrument for AI agents)
+After=network.target xvfb.service
+Requires=xvfb.service
+# If your app talks to a DB or Redis, add their services to After= above
+
+[Service]
+Type=simple
+User=blacktip
+Group=blacktip
+WorkingDirectory=/opt/blacktip-app
+# Environment:
+#   DISPLAY    — matches the Xvfb service's display number
+#   TZ         — should match the timezone in your device profile
+#   NODE_ENV   — production
+#   HOME       — gives Chrome a writable home for user data
+Environment=DISPLAY=:99
+Environment=TZ=America/New_York
+Environment=NODE_ENV=production
+Environment=HOME=/home/blacktip
+
+# Default: run BlackTip CLI serve mode on port 9779.
+# Replace with `node dist/your-app.js` for a custom app.
+ExecStart=/usr/bin/node /opt/blacktip-app/node_modules/@rester159/blacktip/dist/cli.js serve --port 9779
+
+# Restart policy: recover from crashes automatically.
+Restart=on-failure
+RestartSec=5s
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# Resource limits
+# Chrome is greedy. Cap memory to prevent runaway OOM killing the box.
+# Adjust to fit your VM size.
+MemoryMax=2G
+MemoryHigh=1.5G
+# CPU: soft-limit to 2 cores (weight 200 = 2x default). Use CPUQuota to hard-cap.
+CPUWeight=200
+# TasksMax caps the number of child processes (Chrome spawns many).
+TasksMax=512
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/home/blacktip /opt/blacktip-app/logs
+# Chrome's sandbox needs SYS_ADMIN; don't drop it
+AmbientCapabilities=CAP_SYS_ADMIN
+
+# Graceful shutdown
+KillMode=mixed
+TimeoutStopSec=20s
+# Send SIGTERM first, then SIGKILL after 20s
+
+# Logs
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=blacktip
+
+[Install]
+WantedBy=multi-user.target

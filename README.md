@@ -208,6 +208,47 @@ Changes to BlackTip's `.ts` files recompile to `dist/` on save, and the consumin
 
 ---
 
+## Server deployment
+
+BlackTip runs real Chrome in headful mode — on servers you use **Xvfb** (virtual X framebuffer) so Chrome renders to a virtual display instead of a physical monitor. This is the standard approach used by every serious stealth tool; running Chrome with `--headless` is NOT supported because headless mode is detectable at many fingerprint levels.
+
+The repo ships production-ready deployment artifacts:
+
+- **`Dockerfile`** — production image with Chrome Stable, Xvfb, Node 20, and all runtime dependencies. Build with `docker build -t blacktip:latest .`.
+- **`docker-compose.yml`** — one-command local / dev environment. `docker compose up --build`.
+- **`deploy/systemd/xvfb.service`** and **`deploy/systemd/blacktip.service`** — systemd unit files for bare-metal VPS deployments.
+- **`deploy/README.md`** — full deployment guide covering Docker, systemd, AWS / GCP / DigitalOcean / Hetzner / Fly.io, sizing, cost, monitoring, and troubleshooting.
+
+**Quick Docker start:**
+
+```bash
+docker build -t blacktip:latest .
+docker run --rm -it \
+  --shm-size=2gb \
+  --cap-add=SYS_ADMIN \
+  -p 9779:9779 \
+  blacktip:latest
+```
+
+**Quick bare-metal start (Ubuntu 22.04):**
+
+```bash
+# System deps + Chrome + Node
+sudo apt-get update && sudo apt-get install -y xvfb libnss3 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libxss1 libasound2 fonts-liberation libvulkan1
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+wget -qO /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb && sudo apt install -y /tmp/chrome.deb
+
+# Run under Xvfb
+export DISPLAY=:99
+Xvfb :99 -screen 0 1920x1080x24 &
+node your-app.js
+```
+
+See **[deploy/README.md](deploy/README.md)** for the full guide including systemd setup, cloud provider specifics, resource sizing, and troubleshooting.
+
+---
+
 ## What BlackTip is NOT
 
 - **Not an agent.** It doesn't plan or decide. A human or an LLM drives it.

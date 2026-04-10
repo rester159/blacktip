@@ -1,0 +1,55 @@
+# BlackTip local development / demo compose file.
+#
+# Run with:
+#   docker compose up --build
+#
+# This starts BlackTip in serve mode on host port 9779. From any other
+# terminal you can drive it via the CLI:
+#
+#   npx @rester159/blacktip send "await bt.navigate('https://example.com')" --pretty
+#
+# Or from a second container on the same network:
+#
+#   docker compose exec blacktip npx blacktip send "await bt.navigate('...')"
+
+services:
+  blacktip:
+    build: .
+    image: blacktip:local
+    container_name: blacktip
+    # Chrome needs more shared memory than Docker's default 64 MB.
+    shm_size: "2gb"
+    # Chrome's sandbox prefers SYS_ADMIN. If your Docker environment
+    # doesn't allow it, comment this out and add `--no-sandbox` to the
+    # Chrome launch args in your app config (less secure but functional).
+    cap_add:
+      - SYS_ADMIN
+    # Don't start with --init, tini is already the entrypoint.
+    ports:
+      - "9779:9779"
+    environment:
+      # Set this to match the declared timezone in your device profile
+      # so system time queries are consistent with the profile.
+      TZ: America/New_York
+      # Log level: debug, info, warn, error
+      BLACKTIP_LOG_LEVEL: info
+    volumes:
+      # Persist Chrome user data across restarts (cookies, localStorage)
+      # so you don't lose logged-in state between container restarts.
+      - blacktip-chrome-data:/home/blacktip/.config/google-chrome
+      # Persist downloads to the host
+      - ./downloads:/home/blacktip/Downloads
+      # Observability output — JSONL event logs
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      # Simple TCP connect to the serve port. BlackTip doesn't expose
+      # an HTTP health endpoint, so we check the TCP listener.
+      test: ["CMD-SHELL", "node -e \"require('net').createConnection({host:'127.0.0.1',port:9779}).on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  blacktip-chrome-data:

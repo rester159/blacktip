@@ -1,0 +1,48 @@
+# Version control
+.git/
+.gitignore
+.github/
+
+# Build artifacts that the container rebuilds
+node_modules/
+dist/
+*.tsbuildinfo
+*.tgz
+
+# Runtime artifacts
+shot.png
+*.png
+*.jpg
+logs/
+downloads/
+
+# Secrets
+.env
+.env.*
+
+# Session-internal working files
+planning/
+
+# Editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Docs and tests — not needed in the runtime image.
+# The production container runs dist/, not the TypeScript source or tests.
+tests/
+examples/
+*.md
+!README.md
+LICENSE
+
+# Docker files themselves
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Temp
+tmp/
+.publish-smoke-test/
