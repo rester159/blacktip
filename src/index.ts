@@ -41,6 +41,18 @@ export {
 } from './observability.js';
 export type { StructuredEvent, EventExporter } from './observability.js';
 
+// v0.2.0 — stealth diagnostics
+export {
+  captureFingerprint,
+  checkIpReputation,
+  testAgainstAkamai,
+} from './diagnostics.js';
+export type {
+  FingerprintSnapshot,
+  IpReputationResult,
+  AkamaiTestResult,
+} from './diagnostics.js';
+
 export type {
   BlackTipConfig,
   ProfileConfig,

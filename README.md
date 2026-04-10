@@ -159,9 +159,26 @@ See `AGENTS.md` for the full agent-facing reference, including the decision tree
 | `bt.cookies()` / `bt.setCookies()` / `bt.clearCookies()` | Cookie jar |
 | `bt.executeJS(script)` | Raw JS evaluation |
 | `bt.pauseForInput({prompt, validate?, timeoutMs?})` | User-in-the-loop (MFA) |
+| `bt.captureFingerprint()` | TLS / HTTP2 / header snapshot via tls.peet.ws + httpbin (v0.2.0) |
+| `bt.checkIpReputation()` | Egress IP, ASN, datacenter/residential heuristic (v0.2.0) |
+| `bt.testAgainstAkamai(url)` | Akamai-protected target probe with diagnosis (v0.2.0) |
+| `bt.warmSession({sites?, dwellMsRange?})` | Pre-target warm-up — visit normal sites first (v0.2.0) |
 | `bt.serve(port?)` | Start TCP command server |
 
 Plus `SnapshotManager`, `ProxyPool`, `attachObservability`, and the calibration module — see the TypeScript types for details.
+
+### Akamai Bot Manager
+
+As of v0.2.0, BlackTip passes Akamai Bot Manager on validated targets including OpenTable. The headline fix (L016) was a User-Agent / Sec-Ch-Ua client hint consistency bug that had been silently undermining stealth against top-tier commercial detectors since v0.1.0. See **[docs/akamai-bypass.md](docs/akamai-bypass.md)** for the full plan, methodology, current status by detection layer, and a troubleshooting checklist for users who hit blocks.
+
+Quick verification that you're on a fixed build:
+
+```typescript
+const fp = await bt.captureFingerprint();
+if (!fp.headers.uaConsistent) {
+  throw new Error('UA / Sec-Ch-Ua mismatch — upgrade BlackTip to v0.2.0+');
+}
+```
 
 ---
 
@@ -180,6 +197,10 @@ new BlackTip({
   screenResolution: { width: 1920, height: 1080 },
   proxy: 'http://user:pass@host:port',
   chromiumPath: '/custom/chrome',
+  // v0.2.0 — persistent Chrome profile for cookies/history continuity
+  // across BlackTip runs. Critical for sites with "first request from
+  // unknown session" challenges (Akamai, DataDome, PerimeterX).
+  userDataDir: './.bt-profile',
 });
 ```
 

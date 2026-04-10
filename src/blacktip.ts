@@ -6,6 +6,14 @@ import { BehavioralEngine, HUMAN_PROFILE, SCRAPER_PROFILE } from './behavioral-e
 import type { MouseStep } from './behavioral-engine.js';
 import { ElementFinder } from './element-finder.js';
 import { Logger } from './logging.js';
+import {
+  captureFingerprint as diagnosticsCaptureFingerprint,
+  checkIpReputation as diagnosticsCheckIpReputation,
+  testAgainstAkamai as diagnosticsTestAgainstAkamai,
+  type FingerprintSnapshot,
+  type IpReputationResult,
+  type AkamaiTestResult,
+} from './diagnostics.js';
 import type {
   BlackTipConfig,
   ProfileConfig,
@@ -1055,6 +1063,103 @@ export class BlackTip extends EventEmitter {
       }
       return { hidden: count, selectors: hiddenSelectors };
     })()`) as Promise<{ hidden: number; selectors: string[] }>;
+  }
+
+  // ── Stealth diagnostics (v0.2.0) ──
+
+  /**
+   * Capture the active session's TLS, HTTP/2, and HTTP header fingerprint
+   * by navigating to tls.peet.ws/api/all and httpbin.org/headers.
+   *
+   * The most important field in the result is `headers.uaConsistent`. If
+   * that's `false`, you're emitting a User-Agent / Sec-Ch-Ua mismatch
+   * which Akamai / DataDome / PerimeterX will flag as a textbook spoofing
+   * tell. v0.2.0 fixed this for the default config; if you see it, your
+   * code is overriding the User-Agent in a way that doesn't update the
+   * client hint headers in lockstep.
+   */
+  async captureFingerprint(): Promise<FingerprintSnapshot> {
+    this.ensureLaunched();
+    return diagnosticsCaptureFingerprint(this);
+  }
+
+  /**
+   * Query the active session's egress IP and ASN, score it against
+   * known datacenter / residential ASN patterns, and return a structured
+   * result. Uses the free ipinfo.io endpoint.
+   *
+   * If `isDatacenter: true`, your IP is on a known cloud provider's
+   * range and Akamai will almost certainly flag it. Use a residential
+   * proxy or a different network.
+   */
+  async checkIpReputation(): Promise<IpReputationResult> {
+    this.ensureLaunched();
+    return diagnosticsCheckIpReputation(this);
+  }
+
+  /**
+   * Visit an Akamai-protected URL and report the result with diagnosis.
+   * Recognizes the Akamai Access Denied error page format and extracts
+   * the reference number for triage.
+   *
+   * Use this in CI as a regression check, or interactively when you're
+   * trying to figure out why a specific target is blocking you.
+   */
+  async testAgainstAkamai(url: string): Promise<AkamaiTestResult> {
+    this.ensureLaunched();
+    return diagnosticsTestAgainstAkamai(this, url);
+  }
+
+  // ── Session warming (v0.2.0) ──
+
+  /**
+   * Visit a sequence of "normal" sites with realistic dwell times before
+   * the target navigation. Accumulates cookies, populates History API,
+   * and triggers the natural behavioral signals Akamai's profiler
+   * expects to see from a real user.
+   *
+   * Default sites are a small list of safe, fast-loading targets that
+   * don't run heavy detection themselves. Override `sites` to use your
+   * own list, e.g. industry-specific sites for the target you're warming
+   * up against.
+   *
+   * Pass an empty `sites: []` array to skip warming and just dwell on
+   * the current page (useful as a "let the page settle" pause).
+   */
+  async warmSession(options: {
+    sites?: string[];
+    dwellMsRange?: [number, number];
+  } = {}): Promise<{ visited: string[]; durationMs: number }> {
+    this.ensureLaunched();
+    const sites = options.sites ?? [
+      'https://www.google.com/',
+      'https://en.wikipedia.org/wiki/Special:Random',
+      'https://news.ycombinator.com/',
+    ];
+    const [dwellMin, dwellMax] = options.dwellMsRange ?? [3000, 7000];
+    const startedAt = Date.now();
+    const visited: string[] = [];
+
+    for (const url of sites) {
+      try {
+        await this.navigate(url);
+        // Random dwell to mimic human reading time
+        const dwell = Math.floor(dwellMin + Math.random() * (dwellMax - dwellMin));
+        // Simulate a small scroll during dwell — humans don't sit still
+        try {
+          await this.scroll({ direction: 'down', amount: 200 + Math.floor(Math.random() * 400) });
+        } catch { /* scroll may fail on some pages, harmless */ }
+        await this.sleep(dwell);
+        visited.push(url);
+      } catch (err) {
+        this.logger.warn('warmSession site failed, continuing', {
+          url,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    return { visited, durationMs: Date.now() - startedAt };
   }
 
   // ── Iframe Support ──

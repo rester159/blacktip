@@ -46,7 +46,10 @@ export class BrowserCore extends EventEmitter {
   }
 
   async launch(): Promise<void> {
-    this.logger.info('Launching browser', { deviceProfile: this.deviceProfile.name });
+    this.logger.info('Launching browser', {
+      deviceProfile: this.deviceProfile.name,
+      persistent: !!this.config.userDataDir,
+    });
 
     // Minimal launch args. We deliberately do NOT set
     // --disable-blink-features=AutomationControlled, nor do we remove
@@ -70,49 +73,122 @@ export class BrowserCore extends EventEmitter {
     // TLS ClientHello (with GREASE), the real GPU through ANGLE, and the
     // real navigator surface — all things we can't fake as well with JS.
     const execPath = this.config.chromiumPath ?? process.env.BLACKTIP_CHROMIUM_PATH;
-    try {
-      this.browser = await chromium.launch({
-        headless: false,
-        channel: execPath ? undefined : 'chrome',
-        args: launchArgs,
-        executablePath: execPath,
-      });
-    } catch {
-      this.logger.warn('System Chrome not found, falling back to Playwright Chromium');
-      this.browser = await chromium.launch({
-        headless: false,
-        args: launchArgs,
+
+    // ── userDataDir branch: persistent profile mode ──
+    //
+    // When the caller sets userDataDir, we use launchPersistentContext
+    // which gives us a long-lived Chrome profile that carries cookies,
+    // localStorage, history, and visited-sites context across BlackTip
+    // sessions. This makes Akamai's "first request from unknown
+    // session" challenge less likely to fire because the browser
+    // already has a realistic activity history.
+    if (this.config.userDataDir) {
+      try {
+        this.context = await chromium.launchPersistentContext(this.config.userDataDir, {
+          headless: false,
+          channel: execPath ? undefined : 'chrome',
+          args: launchArgs,
+          executablePath: execPath,
+          viewport: {
+            width: this.config.screenResolution!.width,
+            height: this.config.screenResolution!.height,
+          },
+          locale: this.config.locale,
+          timezoneId: this.config.timezone,
+          deviceScaleFactor: this.deviceProfile.devicePixelRatio,
+          colorScheme: 'light',
+          javaScriptEnabled: true,
+          bypassCSP: false,
+          ignoreHTTPSErrors: false,
+        });
+      } catch {
+        this.logger.warn('System Chrome not found for persistent context, falling back to Playwright Chromium');
+        this.context = await chromium.launchPersistentContext(this.config.userDataDir, {
+          headless: false,
+          args: launchArgs,
+          viewport: {
+            width: this.config.screenResolution!.width,
+            height: this.config.screenResolution!.height,
+          },
+          locale: this.config.locale,
+          timezoneId: this.config.timezone,
+          deviceScaleFactor: this.deviceProfile.devicePixelRatio,
+          colorScheme: 'light',
+          javaScriptEnabled: true,
+        });
+      }
+      this.browser = this.context.browser();
+      // launchPersistentContext doesn't expose a Browser unless one was
+      // attached. We continue with the context and an emit-page handler.
+    } else {
+      try {
+        this.browser = await chromium.launch({
+          headless: false,
+          channel: execPath ? undefined : 'chrome',
+          args: launchArgs,
+          executablePath: execPath,
+        });
+      } catch {
+        this.logger.warn('System Chrome not found, falling back to Playwright Chromium');
+        this.browser = await chromium.launch({
+          headless: false,
+          args: launchArgs,
+        });
+      }
+    }
+
+    // L016 fix: NEVER set `userAgent` at the context level. Playwright's
+    // userAgent option overrides the User-Agent HTTP header, but it does
+    // NOT update the Sec-Ch-Ua / Sec-Ch-Ua-Mobile / Sec-Ch-Ua-Platform
+    // client hint headers — those come from the actual Chromium binary
+    // version. Setting one without the other creates a mismatch like
+    // `User-Agent: Chrome/125` + `Sec-Ch-Ua: "Chrome";v="146"` which
+    // Akamai Bot Manager (and any serious detector) catches as a textbook
+    // spoofing tell. We let Chrome's real UA come through and it matches
+    // Sec-Ch-Ua naturally.
+    //
+    // Cross-platform UA spoofing (claim macOS while running on Linux) is
+    // not supported in v0.2.0 — that requires intercepting both UA and
+    // all Sec-Ch-Ua-* headers via setExtraHTTPHeaders, which is a v0.3.0
+    // follow-up. Most users want Chrome-on-their-platform anyway.
+    //
+    // In persistent context mode (userDataDir set), this.context was
+    // already created by launchPersistentContext above and we skip the
+    // newContext call.
+    if (!this.config.userDataDir) {
+      this.context = await this.browser!.newContext({
+        viewport: {
+          width: this.config.screenResolution!.width,
+          height: this.config.screenResolution!.height,
+        },
+        locale: this.config.locale,
+        timezoneId: this.config.timezone,
+        deviceScaleFactor: this.deviceProfile.devicePixelRatio,
+        colorScheme: 'light',
+        javaScriptEnabled: true,
+        bypassCSP: false,
+        ignoreHTTPSErrors: false,
       });
     }
 
-    this.context = await this.browser.newContext({
-      viewport: {
-        width: this.config.screenResolution!.width,
-        height: this.config.screenResolution!.height,
-      },
-      userAgent: this.deviceProfile.userAgent,
-      locale: this.config.locale,
-      timezoneId: this.config.timezone,
-      deviceScaleFactor: this.deviceProfile.devicePixelRatio,
-      colorScheme: 'light',
-      javaScriptEnabled: true,
-      bypassCSP: false,
-      ignoreHTTPSErrors: false,
-    });
+    if (!this.context) {
+      throw new Error('BrowserCore: failed to create context');
+    }
+    const ctx = this.context;
 
     // Inject evasion scripts into every new page/frame
     const evasionScripts = generateEvasionScripts(this.deviceProfile);
     for (const script of evasionScripts) {
-      await this.context.addInitScript(script);
+      await ctx.addInitScript(script);
     }
 
     // Set default timeout
-    this.context.setDefaultTimeout(this.config.timeout);
+    ctx.setDefaultTimeout(this.config.timeout);
 
     // Listen for new pages (popups, new tabs). Dedupe: the handler fires for
     // every page Chromium creates, including ones we just pushed ourselves —
     // without this guard we'd double-count every tab.
-    this.context.on('page', (page) => {
+    ctx.on('page', (page) => {
       if (this.pages.includes(page)) return;
       this.pages.push(page);
       const index = this.pages.length - 1;
@@ -126,9 +202,24 @@ export class BrowserCore extends EventEmitter {
       } satisfies TabChangeEvent);
     });
 
-    // Open initial page — the 'page' event handler pushes + attaches close
-    // handler + emits tabChange for us, so we just set the active index.
-    await this.context.newPage();
+    // For persistent contexts, an initial page may already exist (Chrome
+    // restores the last-open tab from the profile). Use that instead of
+    // creating a new one.
+    const existingPages = ctx.pages();
+    if (existingPages.length > 0) {
+      // Push existing pages into our tracking array if they're not already
+      // tracked by the 'page' event handler (which only fires for NEW pages).
+      for (const p of existingPages) {
+        if (!this.pages.includes(p)) {
+          this.pages.push(p);
+          this.attachPageCloseHandler(p, this.pages.length - 1);
+        }
+      }
+    } else {
+      // Open initial page — the 'page' event handler pushes + attaches close
+      // handler + emits tabChange for us, so we just set the active index.
+      await ctx.newPage();
+    }
     this.activePageIndex = 0;
 
     this.logger.info('Browser launched successfully');

@@ -13,6 +13,17 @@ export interface BlackTipConfig {
   screenResolution?: { width: number; height: number };
   persistent?: boolean;
   chromiumPath?: string;
+  /**
+   * Path to a Chrome user data directory for persistent profiles.
+   * When set, Chrome carries cookies, localStorage, history, and visited
+   * sites across BlackTip sessions, which makes Akamai's "first request
+   * from unknown session" challenge less likely to fire.
+   *
+   * Example: `'./.bt-profile'` (relative to cwd) or `'/var/lib/blacktip/profile'`.
+   *
+   * If unset, Chrome runs with a fresh profile each launch (default).
+   */
+  userDataDir?: string;
 }
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';

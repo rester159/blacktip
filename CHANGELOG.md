@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-04-10
+
+### Defeating Akamai Bot Manager — the L016 fix
+
+The headline change in 0.2.0 is fixing the User-Agent / Sec-Ch-Ua consistency bug that had been silently undermining BlackTip against top-tier commercial detectors since 0.1.0. **OpenTable's Akamai Bot Manager went from blocking us at the edge to letting us into the booking flow on the very next request after the fix landed.** Same machine, same network, same IP.
+
+See `docs/akamai-bypass.md` for the full plan, methodology, and status against each Akamai detection layer.
+
+### Fixed
+
+- **L016 — User-Agent / Sec-Ch-Ua consistency.** `browser-core.ts` was setting `userAgent` at the Playwright context level via `newContext({userAgent: ...})`. Playwright's `userAgent` option overrides the `User-Agent` HTTP header but does NOT update the `Sec-Ch-Ua` / `Sec-Ch-Ua-Mobile` / `Sec-Ch-Ua-Platform` client hint headers — those come from the actual Chromium binary version. The result was BlackTip broadcasting `User-Agent: Chrome/125` and `Sec-Ch-Ua: "Google Chrome";v="146"` simultaneously, an inconsistency real Chrome NEVER produces and that Akamai Bot Manager catches as a textbook spoofing tell. Fix: removed the `userAgent` context override entirely; real Chrome's natural User-Agent comes through and matches Sec-Ch-Ua.
+- This bug had been silently invalidating BlackTip's stealth against high-tier detectors. CreepJS / bot.sannysoft / browserleaks / fingerprint.com don't cross-check UA against client hints, so they didn't catch it. Akamai / DataDome / PerimeterX do, and they did.
+- **Side effect:** cross-platform UA spoofing (declaring a `desktop-macos` profile while running on Linux) is no longer supported by default. v0.3.0 will reintroduce it via `setExtraHTTPHeaders` for callers who need it.
+
+### Added
+
+- **`bt.captureFingerprint()`** — captures TLS, HTTP/2, and HTTP header fingerprint via `tls.peet.ws/api/all` and `httpbin.org/headers`. Returns a structured `FingerprintSnapshot` with the critical `headers.uaConsistent` flag for verifying L016 is fixed in any given install.
+- **`bt.checkIpReputation()`** — queries the active session's egress IP via `ipinfo.io`, scores it against known datacenter / residential ASN patterns (Amazon, Google Cloud, Azure, OVH, DigitalOcean, Hetzner, Linode, Vultr — and major residential ISPs), returns an `IpReputationResult` with `isDatacenter` / `isResidential` flags and free-form notes.
+- **`bt.testAgainstAkamai(url)`** — visits an Akamai-protected URL and reports the result with diagnosis. Recognizes the Akamai Access Denied page format, extracts the reference number, and returns a suggested next step. Use as a regression check in CI or interactively when troubleshooting.
+- **`bt.warmSession({sites?, dwellMsRange?})`** — visits a sequence of "normal" sites with realistic dwell times and small scrolls before the target navigation. Accumulates cookies, populates History, and triggers natural behavioral signals so the target sees a session that already looks human.
+- **`BlackTipConfig.userDataDir`** — persistent Chrome user data directory. When set, BlackTip uses `chromium.launchPersistentContext()` instead of the default fresh context, so cookies / localStorage / history / visited sites accumulate across runs. Critical for sites with "first request from unknown session" challenges.
+- **`docs/akamai-bypass.md`** — comprehensive 7-phase plan for defeating Akamai Bot Manager, with current passing/failing matrix per detection layer, validated targets, recipes, and a troubleshooting checklist for users who hit blocks.
+- **10 new diagnostics integration tests** in `tests/v04-diagnostics.integration.test.ts`. The most important is the L016 consistency check, which serves as a regression guard so we never reintroduce the UA / Sec-Ch-Ua mismatch.
+
+### Validated against
+
+- **OpenTable** (Akamai Bot Manager): blocked at every URL in 0.1.0 with Access Denied references; passing as of 0.2.0. Confirmed against the deep-link booking page for Gjelina (Venice).
+- All 0.1.0 detector targets continue to pass (bot.sannysoft, CreepJS, tls.peet.ws, browserleaks×4, fingerprint.com, pixelscan, browserscan, nowsecure.nl).
+
+### Test suite
+
+- **162 → 172 tests passing**, zero regressions.
+
+### What's deferred to 0.3.0+
+
+- TLS-rewriting proxy (`bogdanfinn/tls-client` integration) for cross-platform UA spoofing and Chrome version impersonation
+- Akamai sensor data analysis and targeted JS-level patches for sites that probe deeper than headers
+- Tier 2 behavioral calibration against real public datasets (Balabit, CMU Keystroke, GREYC)
+
 ## [0.1.0] — 2026-04-10
 
 ### First public release

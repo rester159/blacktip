@@ -1,6 +1,6 @@
 {
   "name": "@rester159/blacktip",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Stealth browser instrument for AI agents. Real Chrome + patchright CDP stealth + human-calibrated behavioral simulation. Every action is indistinguishable from a human.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
