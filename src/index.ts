@@ -27,6 +27,27 @@ export type {
   CalibratedProfile,
 } from './behavioral/calibration.js';
 
+// v0.3.0 — dataset parsers for end-to-end calibration
+export {
+  parseCmuKeystrokeCsv,
+  parseBalabitMouseCsv,
+  parseGenericTelemetryJson,
+  CMU_PHRASE,
+} from './behavioral/parsers.js';
+
+// v0.3.0 — TLS side-channel via bogdanfinn/tls-client
+export { TlsSideChannel } from './tls-side-channel.js';
+export type { TlsRequest, TlsResponse, ParsedCookie } from './tls-side-channel.js';
+
+// v0.4.0 — IdentityPool: long-running session and identity rotation
+export { IdentityPool } from './identity-pool.js';
+export type {
+  Identity,
+  IdentityPoolOptions,
+  RotationPolicy,
+  DeviceProfileName,
+} from './identity-pool.js';
+
 export { ProxyPool, ProxyProviders, proxyToUrl } from './proxy-pool.js';
 export type { ProxyDescriptor, ProxyProtocol, PoolOptions } from './proxy-pool.js';
 
@@ -46,11 +67,14 @@ export {
   captureFingerprint,
   checkIpReputation,
   testAgainstAkamai,
+  testAgainstAntiBot,
 } from './diagnostics.js';
 export type {
   FingerprintSnapshot,
   IpReputationResult,
   AkamaiTestResult,
+  AntiBotTestResult,
+  AntiBotVendor,
 } from './diagnostics.js';
 
 export type {

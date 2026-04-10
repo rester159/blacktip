@@ -10,10 +10,13 @@ import {
   captureFingerprint as diagnosticsCaptureFingerprint,
   checkIpReputation as diagnosticsCheckIpReputation,
   testAgainstAkamai as diagnosticsTestAgainstAkamai,
+  testAgainstAntiBot as diagnosticsTestAgainstAntiBot,
   type FingerprintSnapshot,
   type IpReputationResult,
   type AkamaiTestResult,
+  type AntiBotTestResult,
 } from './diagnostics.js';
+import { TlsSideChannel, type TlsRequest, type TlsResponse } from './tls-side-channel.js';
 import type {
   BlackTipConfig,
   ProfileConfig,
@@ -136,6 +139,7 @@ export class BlackTip extends EventEmitter {
   private core: BrowserCore;
   private engine: BehavioralEngine;
   private finder: ElementFinder;
+  private tlsChannel: TlsSideChannel | null = null;
   private logger: Logger;
   private config: BlackTipConfig;
   private customProfiles = new Map<string, ProfileConfig>();
@@ -182,10 +186,44 @@ export class BlackTip extends EventEmitter {
   async launch(): Promise<string> {
     await this.core.launch();
     this.launched = true;
+
+    // IP reputation gate (v0.4.0). When `requireResidentialIp` is set,
+    // we run the same check as `bt.checkIpReputation()` and either warn
+    // or throw based on the verdict. The check itself navigates to
+    // ipinfo.io, so we do it after launch is complete.
+    const gate = this.config.requireResidentialIp;
+    if (gate) {
+      try {
+        const verdict = await diagnosticsCheckIpReputation(this);
+        if (verdict.isDatacenter) {
+          const msg = `IP reputation gate: egress IP ${verdict.ip} (${verdict.org}) is on a known datacenter ASN. ${verdict.notes.join(' ')}`;
+          if (gate === 'warn') {
+            this.logger.warn(msg);
+          } else {
+            // 'throw' or boolean true
+            await this.core.close();
+            this.launched = false;
+            throw new Error(msg);
+          }
+        }
+      } catch (err) {
+        // If the check itself fails (offline, etc.) and the gate is
+        // 'throw', we re-raise; if 'warn', we log and continue.
+        if (err instanceof Error && err.message.startsWith('IP reputation gate:')) throw err;
+        if (gate !== 'warn') {
+          this.logger.warn(`IP reputation gate check failed (allowing launch): ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    }
+
     return BlackTip.agentGuide();
   }
 
   async close(): Promise<void> {
+    if (this.tlsChannel) {
+      await this.tlsChannel.close().catch(() => undefined);
+      this.tlsChannel = null;
+    }
     await this.core.close();
     this.launched = false;
   }
@@ -1108,6 +1146,69 @@ export class BlackTip extends EventEmitter {
   async testAgainstAkamai(url: string): Promise<AkamaiTestResult> {
     this.ensureLaunched();
     return diagnosticsTestAgainstAkamai(this, url);
+  }
+
+  /**
+   * Multi-vendor anti-bot probe. Recognises Akamai, DataDome, Cloudflare,
+   * PerimeterX/HUMAN, Imperva, Kasada, and Arkose. Reports both the
+   * vendors that served a block/challenge AND the vendor signals (cookies,
+   * scripts) present on a passing page — so you can verify the target is
+   * actually protected and BlackTip is sliding past it, not a false negative
+   * on an unprotected URL.
+   */
+  async testAgainstAntiBot(url: string): Promise<AntiBotTestResult> {
+    this.ensureLaunched();
+    return diagnosticsTestAgainstAntiBot(this, url);
+  }
+
+  // ── TLS side-channel (v0.3.0) ──
+
+  /**
+   * Perform an HTTP request through the bogdanfinn/tls-client Go daemon
+   * with a real Chrome TLS ClientHello, real H2 frame settings, and real
+   * H2 frame order. Lazily spawns the daemon on first call and reuses it
+   * across subsequent calls in the same BlackTip session.
+   *
+   * Use this when an edge gates the very first request before BlackTip's
+   * browser has a usable session — make the gating request via the side
+   * channel, then call `bt.injectTlsCookies(resp)` to push the resulting
+   * cookies into the browser session before navigating.
+   *
+   * Requires the Go daemon binary at `native/tls-client/blacktip-tls[.exe]`.
+   * Build it once with: `cd native/tls-client && go build .`
+   */
+  async fetchWithTls(req: TlsRequest): Promise<TlsResponse> {
+    if (!this.tlsChannel) {
+      this.tlsChannel = await TlsSideChannel.spawn();
+    }
+    return this.tlsChannel.fetch(req);
+  }
+
+  /**
+   * Inject cookies returned by `fetchWithTls()` into the browser session
+   * so a subsequent `bt.navigate()` carries the same edge-issued tokens
+   * the gating request earned. The cookies are filtered to those whose
+   * domain matches the target URL's eTLD+1.
+   */
+  async injectTlsCookies(resp: TlsResponse, targetUrl?: string): Promise<number> {
+    this.ensureLaunched();
+    const targetHost = (() => {
+      if (!targetUrl) return null;
+      try { return new URL(targetUrl).hostname; } catch { return null; }
+    })();
+    const filtered = resp.cookies.filter((c) => {
+      if (!targetHost) return true;
+      const cookieDomain = c.domain.replace(/^\./, '');
+      return targetHost === cookieDomain || targetHost.endsWith('.' + cookieDomain);
+    });
+    if (filtered.length === 0) return 0;
+    await this.setCookies(filtered.map((c) => ({
+      name: c.name,
+      value: c.value,
+      domain: c.domain.startsWith('.') ? c.domain : '.' + c.domain,
+      path: c.path || '/',
+    })));
+    return filtered.length;
   }
 
   // ── Session warming (v0.2.0) ──

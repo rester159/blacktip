@@ -49,6 +49,22 @@ BlackTip's architecture:
 - nowsecure.nl (Cloudflare bot-fight test, nodriver author's public benchmark) — passes without challenge
 - antoinevastel.com/bots (ex-DataDome VP of Research) — loads without block
 - Anthem.com (Okta MFA, Angular SPA, real insurance claim submission) — end-to-end flow successful
+- Walmart.com (Akamai + PerimeterX simultaneously) — passes both layers
+- BestBuy.com (Akamai) — passes
+- Vinted.com (DataDome) — real catalog renders, datadome cookie present
+- Crunchbase.com (Cloudflare) — passes, cf_clearance issued silently
+- ChatGPT.com (Cloudflare) — passes, cf_clearance issued silently
+- Twitch.tv (Kasada) — passes, kasada client script detected on the page
+- Ticketmaster.com — passes
+- OpenTable.com Gjelina deep link (Akamai Bot Manager) — passes; full booking endpoint with real time slots
+
+**v0.4.0 also ships:**
+- **`IdentityPool`** — long-running session and identity rotation. An identity is the union of cookies, localStorage, proxy, device profile, behavior profile, locale, and timezone. Persists to a JSON file so identities survive restarts. Per-domain burn list — an identity blocked on one site is still eligible for others. Composes `SnapshotManager` and `ProxyPool` with a feedback loop that auto-bans burned identities' proxies in the pool. See **[docs/identity-pool.md](docs/identity-pool.md)**.
+- **`BlackTipConfig.requireResidentialIp`** — `'throw'` / `'warn'` / `false`. Runs `bt.checkIpReputation()` on launch and refuses (or warns) if the egress IP is on a known datacenter ASN. The launch-time defensive companion to `IdentityPool`'s outbound proxy selection.
+- **Go-based TLS side-channel daemon (`bt.fetchWithTls`)** that performs HTTP requests with a real Chrome TLS ClientHello, H2 frame settings, and frame order via `bogdanfinn/tls-client`. Use to make gating requests the browser can't make through itself, then inject the resulting cookies into the browser session before navigating. JA4 `t13d1516h2_8daaf6152771_d8a2da3f94cd`, GREASE first cipher, exact Chrome H2 fingerprint. See **[docs/tls-side-channel.md](docs/tls-side-channel.md)**.
+- **Behavioral profile calibrated against the real CMU Keystroke Dynamics dataset.** **53% closer to real human hold-time distribution** than the canonical defaults on a held-out subject set (51 subjects, 80/20 split). See **[docs/calibration-validation.md](docs/calibration-validation.md)** for methodology and reproduction.
+
+See **[docs/anti-bot-validation.md](docs/anti-bot-validation.md)** for the live multi-vendor scoreboard with vendor-signal verification (proves each target is actually protected, not a false negative on an unprotected URL).
 
 ---
 
@@ -162,6 +178,11 @@ See `AGENTS.md` for the full agent-facing reference, including the decision tree
 | `bt.captureFingerprint()` | TLS / HTTP2 / header snapshot via tls.peet.ws + httpbin (v0.2.0) |
 | `bt.checkIpReputation()` | Egress IP, ASN, datacenter/residential heuristic (v0.2.0) |
 | `bt.testAgainstAkamai(url)` | Akamai-protected target probe with diagnosis (v0.2.0) |
+| `bt.testAgainstAntiBot(url)` | Multi-vendor probe — detects Akamai, DataDome, Cloudflare, PerimeterX, Imperva, Kasada, Arkose, plus vendor signals on a passing page (v0.2.0) |
+| `bt.fetchWithTls(req)` | Perform an HTTP request via a Go-based `bogdanfinn/tls-client` daemon with a real Chrome TLS ClientHello, H2 frame settings, and frame order. Use for first-request edge gating and cross-platform UA spoofing. Requires the daemon binary at `native/tls-client/` (build with `go build .`) (v0.3.0) |
+| `bt.injectTlsCookies(resp, targetUrl?)` | Inject cookies returned by `fetchWithTls()` into the browser session, filtered by target eTLD+1 (v0.3.0) |
+
+Plus `IdentityPool` (v0.4.0) for long-running session and identity rotation across many flows. See **[docs/identity-pool.md](docs/identity-pool.md)**.
 | `bt.warmSession({sites?, dwellMsRange?})` | Pre-target warm-up — visit normal sites first (v0.2.0) |
 | `bt.serve(port?)` | Start TCP command server |
 

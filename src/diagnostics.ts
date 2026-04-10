@@ -98,6 +98,36 @@ export interface AkamaiTestResult {
   durationMs: number;
 }
 
+/** Anti-bot vendors that BlackTip's diagnostics can recognize. */
+export type AntiBotVendor =
+  | 'akamai'
+  | 'datadome'
+  | 'cloudflare'
+  | 'perimeterx'
+  | 'imperva'
+  | 'kasada'
+  | 'arkose'
+  | 'unknown';
+
+export interface AntiBotTestResult {
+  url: string;
+  /** True if the page loaded normally (no recognised challenge or block) */
+  passed: boolean;
+  finalUrl: string;
+  title: string;
+  /** Vendors that left a tell on the rendered page (block OR challenge interstitial) */
+  detectedVendors: AntiBotVendor[];
+  /** Vendor signatures observed even on a passing page (cookies, scripts, headers) */
+  vendorSignals: { vendor: AntiBotVendor; signal: string }[];
+  /** Akamai reference number, if a block from Akamai */
+  akamaiReference: string | null;
+  /** First 300 chars of body — useful for diagnosis */
+  bodyPreview: string;
+  /** Suggested next step based on what we observed */
+  suggestion: string;
+  durationMs: number;
+}
+
 // ── Datacenter ASN heuristics ──
 //
 // Not exhaustive — just covers the major cloud providers and known
@@ -359,6 +389,154 @@ export async function testAgainstAkamai(bt: BlackTip, url: string): Promise<Akam
       passed: false,
       finalUrl: url,
       title: '',
+      akamaiReference: null,
+      bodyPreview: '',
+      suggestion: `Navigation threw: ${err instanceof Error ? err.message : String(err)}`,
+      durationMs: Date.now() - start,
+    };
+  }
+}
+
+// ── testAgainstAntiBot ──
+//
+// Generic anti-bot probe that recognises Akamai, DataDome, Cloudflare,
+// PerimeterX/HUMAN, Imperva, Kasada and Arkose. Validated against the
+// scoreboard in docs/anti-bot-validation.md.
+
+const VENDOR_BLOCK_PATTERNS: { vendor: AntiBotVendor; titleRe?: RegExp; bodyRe?: RegExp }[] = [
+  { vendor: 'akamai', titleRe: /^Access Denied$/, bodyRe: /You don't have permission to access|errors\.edgesuite\.net/i },
+  { vendor: 'datadome', bodyRe: /geo\.captcha-delivery\.com|captcha-delivery\.com|please enable javascript and cookies to continue|datado\.me/i },
+  { vendor: 'cloudflare', titleRe: /^Just a moment\.\.\.$|^Attention Required! \| Cloudflare$/, bodyRe: /Checking your browser before accessing|cf-browser-verification|challenges\.cloudflare\.com|Sorry, you have been blocked/i },
+  { vendor: 'perimeterx', titleRe: /^Access to this page has been denied/, bodyRe: /Press (?:&|and) Hold to confirm you (?:are|are not) a human|px-captcha|perimeterx\.net|human\.com/i },
+  { vendor: 'imperva', bodyRe: /Request unsuccessful\. Incapsula incident ID|_Incapsula_Resource|Incapsula incident/i },
+  { vendor: 'kasada', bodyRe: /kpsdk|ips\.js\?|kasada/i },
+  { vendor: 'arkose', bodyRe: /client-api\.arkoselabs\.com|funcaptcha/i },
+];
+
+const VENDOR_SCRIPT_SIGNAL_QUERY = `(() => {
+  const out = [];
+  const html = document.documentElement.outerHTML;
+  if (/datado\\.me|js\\.datadome\\.co/i.test(html)) out.push({vendor:'datadome', signal:'script'});
+  if (/perimeterx|px-cdn|px-captcha|human-security/i.test(html)) out.push({vendor:'perimeterx', signal:'script'});
+  if (/challenges\\.cloudflare\\.com|cdn-cgi\\/challenge-platform/i.test(html)) out.push({vendor:'cloudflare', signal:'script'});
+  if (/akam\\/|ak\\.bmpsdk|akamaihd\\.net\\/sensor/i.test(html)) out.push({vendor:'akamai', signal:'script'});
+  if (/x-kpsdk-/i.test(html)) out.push({vendor:'kasada', signal:'script'});
+  return JSON.stringify(out);
+})()`;
+
+// Cookie-name patterns for the vendor cookie checks. Run against the
+// full cookie jar from BlackTip's cookies API (which includes httpOnly
+// cookies that document.cookie can't see — cf_clearance, __cf_bm,
+// _abck, datadome, etc. are all httpOnly).
+const VENDOR_COOKIE_PATTERNS: { vendor: AntiBotVendor; nameRe: RegExp }[] = [
+  { vendor: 'datadome', nameRe: /^(datadome|dd_cookie_test_|dd_s)/i },
+  { vendor: 'perimeterx', nameRe: /^_px[a-z0-9]*$|^_pxhd$/i },
+  { vendor: 'cloudflare', nameRe: /^(cf_clearance|__cf_bm|__cflb|_cfuvid)$/i },
+  { vendor: 'akamai', nameRe: /^(_abck|bm_sz|ak_bmsc|bm_sv|bm_mi|bm_so)$/i },
+  { vendor: 'imperva', nameRe: /^(visid_incap_|incap_ses_)/i },
+];
+
+/**
+ * Visit a URL and report whether any major anti-bot vendor served a
+ * challenge or block. Recognises Akamai, DataDome, Cloudflare, PerimeterX/HUMAN,
+ * Imperva, Kasada and Arkose. Captures vendor signals (cookies, scripts) even
+ * on a passing page so you can verify a target is actually protected and
+ * BlackTip is sliding past it — not a false negative on an unprotected URL.
+ */
+export async function testAgainstAntiBot(bt: BlackTip, url: string): Promise<AntiBotTestResult> {
+  const start = Date.now();
+  try {
+    await bt.navigate(url);
+    await new Promise((r) => setTimeout(r, 2500));
+
+    const info = (await bt.executeJS(`(() => ({
+      url: location.href,
+      title: document.title,
+      bodyPreview: (document.body ? document.body.innerText : '').slice(0, 800),
+    }))()`)) as { url: string; title: string; bodyPreview: string };
+
+    const detectedVendors: AntiBotVendor[] = [];
+    for (const { vendor, titleRe, bodyRe } of VENDOR_BLOCK_PATTERNS) {
+      if ((titleRe && titleRe.test(info.title)) || (bodyRe && bodyRe.test(info.bodyPreview))) {
+        if (!detectedVendors.includes(vendor)) detectedVendors.push(vendor);
+      }
+    }
+
+    const scriptSignalsRaw = (await bt.executeJS(VENDOR_SCRIPT_SIGNAL_QUERY)) as string;
+    const vendorSignals: { vendor: AntiBotVendor; signal: string }[] = [];
+    try {
+      const scriptSignals = JSON.parse(scriptSignalsRaw) as { vendor: AntiBotVendor; signal: string }[];
+      vendorSignals.push(...scriptSignals);
+    } catch { /* leave empty */ }
+
+    // Cookie signals — read via the cookies API so we see httpOnly cookies
+    // (cf_clearance, __cf_bm, _abck, datadome, etc. are all httpOnly and
+    // invisible to document.cookie). The current page's eTLD+1 is what we
+    // care about — we don't want to leak signals from prior navigations
+    // in the same session.
+    try {
+      const allCookies = await bt.cookies();
+      const currentHost = (() => {
+        try { return new URL(info.url).hostname; } catch { return null; }
+      })();
+      const seen = new Set<string>();
+      for (const c of allCookies) {
+        if (currentHost) {
+          // Match cookies whose domain is a parent or equal of the current host.
+          const cookieDomain = c.domain.replace(/^\./, '');
+          if (currentHost !== cookieDomain && !currentHost.endsWith('.' + cookieDomain)) continue;
+        }
+        for (const { vendor, nameRe } of VENDOR_COOKIE_PATTERNS) {
+          if (nameRe.test(c.name)) {
+            const key = vendor + ':cookie';
+            if (!seen.has(key)) {
+              vendorSignals.push({ vendor, signal: 'cookie' });
+              seen.add(key);
+            }
+          }
+        }
+      }
+    } catch { /* cookies API may fail in edge cases — leave script signals */ }
+
+    const refMatch = info.bodyPreview.match(/Reference\s*#([0-9a-f.]+)/);
+    const akamaiReference = detectedVendors.includes('akamai') && refMatch ? refMatch[1] ?? null : null;
+
+    const passed = detectedVendors.length === 0;
+    const suggestion = passed
+      ? vendorSignals.length > 0
+        ? `Page loaded successfully. Vendor signals present (${vendorSignals.map((s) => s.vendor).join(', ')}) — target is protected and BlackTip is passing.`
+        : 'Page loaded successfully. No anti-bot vendor signals detected — the target may not be protected.'
+      : [
+          `Blocked by: ${detectedVendors.join(', ')}.`,
+          'Diagnosis steps:',
+          '1. `bt.captureFingerprint()` — verify `headers.uaConsistent` is true.',
+          '2. `bt.checkIpReputation()` — if `isDatacenter: true`, switch to a residential proxy.',
+          '3. Test the same URL in your normal Chrome from this machine. If that also blocks, the IP is flagged.',
+          '4. `bt.warmSession({sites: [...]})` before retrying.',
+          '5. Set `userDataDir` in BlackTipConfig for a persistent profile.',
+          akamaiReference ? `Akamai reference: ${akamaiReference}` : '',
+        ].filter(Boolean).join('\n');
+
+    return {
+      url,
+      passed,
+      finalUrl: info.url,
+      title: info.title,
+      detectedVendors,
+      vendorSignals,
+      akamaiReference,
+      bodyPreview: info.bodyPreview.slice(0, 300),
+      suggestion,
+      durationMs: Date.now() - start,
+    };
+  } catch (err) {
+    return {
+      url,
+      passed: false,
+      finalUrl: url,
+      title: '',
+      detectedVendors: [],
+      vendorSignals: [],
       akamaiReference: null,
       bodyPreview: '',
       suggestion: `Navigation threw: ${err instanceof Error ? err.message : String(err)}`,

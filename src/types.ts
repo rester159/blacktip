@@ -24,6 +24,21 @@ export interface BlackTipConfig {
    * If unset, Chrome runs with a fresh profile each launch (default).
    */
   userDataDir?: string;
+  /**
+   * IP reputation gate. When set, BlackTip queries `bt.checkIpReputation()`
+   * immediately after `launch()` and acts based on the verdict:
+   *
+   *   - `false` / unset (default): no check.
+   *   - `'warn'`: log a warning if the egress IP is on a known datacenter
+   *     ASN, but allow the launch to proceed.
+   *   - `'throw'` / `true`: throw on launch if the egress IP is datacenter.
+   *     This is the safest setting for high-stakes flows where a flagged
+   *     IP would burn a real account.
+   *
+   * Use `'throw'` in CI / production. Use `'warn'` for local dev. Leave
+   * unset for offline / air-gapped use.
+   */
+  requireResidentialIp?: boolean | 'warn' | 'throw';
 }
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';

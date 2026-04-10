@@ -101,6 +101,32 @@ describe('v0.2.0 stealth diagnostics', () => {
     expect(typeof result.durationMs).toBe('number');
   });
 
+  // ── testAgainstAntiBot (multi-vendor) ──
+
+  it('testAgainstAntiBot returns the new shape on a non-protected URL', async () => {
+    const r = await bt.testAgainstAntiBot('https://example.com/');
+    expect(r.passed).toBe(true);
+    expect(Array.isArray(r.detectedVendors)).toBe(true);
+    expect(r.detectedVendors.length).toBe(0);
+    expect(Array.isArray(r.vendorSignals)).toBe(true);
+    expect(typeof r.suggestion).toBe('string');
+    expect(r.suggestion.length).toBeGreaterThan(20);
+    expect(typeof r.durationMs).toBe('number');
+  }, 30_000);
+
+  it('testAgainstAntiBot detects vendor cookies on a real DataDome target', async () => {
+    // Vinted is DataDome-protected. We expect passed:true (BlackTip slides
+    // past) AND vendorSignals showing the datadome cookie — proof the
+    // target is actually armed and we're not getting a false negative on
+    // an unprotected URL.
+    const r = await bt.testAgainstAntiBot('https://www.vinted.com/');
+    expect(r.passed).toBe(true);
+    const datadomeSignal = r.vendorSignals.find((s) => s.vendor === 'datadome');
+    // If this assertion ever fails, either Vinted moved off DataDome or
+    // BlackTip's cookie pattern needs an update.
+    expect(datadomeSignal).toBeDefined();
+  }, 60_000);
+
   // ── warmSession ──
 
   it('warmSession visits a custom site list and returns visited URLs', async () => {

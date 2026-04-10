@@ -42,3 +42,11 @@ planning/
 .publish-smoke-test/
 downloads/
 tmp/
+
+# Behavioral calibration datasets — non-redistributable, users acquire themselves
+# (CMU Keystroke Dynamics, Balabit Mouse Dynamics, etc.)
+data/
+
+# Compiled Go TLS daemon binary — built locally, not shipped via npm
+native/tls-client/blacktip-tls
+native/tls-client/blacktip-tls.exe
