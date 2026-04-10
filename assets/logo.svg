@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 80" fill="none" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <!-- BlackTip logo: a stylized M995-inspired round with blacked tip -->
+  <!-- The projectile silhouette sits left, wordmark sits right -->
+
+  <defs>
+    <linearGradient id="jacket" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#c7a572"/>
+      <stop offset="50%" stop-color="#b8923d"/>
+      <stop offset="100%" stop-color="#8a6b1f"/>
+    </linearGradient>
+    <linearGradient id="blacktip" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1a1a1a"/>
+      <stop offset="100%" stop-color="#000000"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Round: brass jacket body -->
+  <path d="M 20 30 L 20 50 L 50 50 L 55 30 Z" fill="url(#jacket)" stroke="#5a4412" stroke-width="0.8"/>
+
+  <!-- Tip (the "black tip") -->
+  <path d="M 50 50 L 55 30 L 72 40 Z" fill="url(#blacktip)" stroke="#000" stroke-width="0.8"/>
+
+  <!-- Brass rim detail -->
+  <rect x="20" y="30" width="3" height="20" fill="#8a6b1f" opacity="0.6"/>
+
+  <!-- Wordmark -->
+  <text x="88" y="48" font-family="Helvetica Neue, Arial, sans-serif" font-size="28" font-weight="700" fill="#1a1a1a" letter-spacing="-0.5">BlackTip</text>
+  <text x="88" y="65" font-family="Helvetica Neue, Arial, sans-serif" font-size="10" font-weight="400" fill="#666" letter-spacing="0.5">STEALTH BROWSER INSTRUMENT</text>
+</svg>

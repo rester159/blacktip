@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Fast jobs that always run ──
+
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  unit-tests:
+    name: Unit tests (behavioral, calibration, logger)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run test:unit
+
+  build:
+    name: Build dist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
+      - name: Verify dist exists and exports correctly
+        run: |
+          test -f dist/index.js
+          test -f dist/index.d.ts
+          test -f dist/cli.js
+          node -e "import('./dist/index.js').then(m => { if (typeof m.BlackTip !== 'function') throw new Error('BlackTip export missing'); console.log('dist exports OK'); })"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          retention-days: 7
+
+  # ── Integration tests with real browser (slower) ──
+  # These require Chrome/patchright to be installed and run a real headful-
+  # compatible browser. Allowed to fail as a signal rather than a hard block
+  # until we validate stability across CI runners.
+
+  integration-tests:
+    name: Integration tests (real Chromium via patchright)
+    runs-on: ubuntu-latest
+    needs: [typecheck, build]
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Install patchright Chromium
+        run: npx patchright install --with-deps chromium
+      - name: Run integration tests
+        run: npm run test:integration
+        env:
+          DEBUG: ''
+      - name: Upload failure screenshots
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-screenshots
+          path: |
+            tests/**/*.png
+            shot.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ── Package smoke test: install the tarball and verify exports ──
+
+  package-smoke:
+    name: Package smoke test (install tarball, verify exports)
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build
+      - name: Pack tarball
+        run: npm pack
+      - name: Install in fresh project and verify exports
+        run: |
+          mkdir -p /tmp/blacktip-smoke
+          cd /tmp/blacktip-smoke
+          echo '{"name":"smoke","version":"0.0.1","type":"module"}' > package.json
+          npm install $GITHUB_WORKSPACE/rester159-blacktip-*.tgz
+          cat > test.mjs <<'EOF'
+          import { BlackTip, ProxyPool, SnapshotManager, attachObservability, newTraceId } from '@rester159/blacktip';
+          if (typeof BlackTip !== 'function') throw new Error('BlackTip missing');
+          if (typeof ProxyPool !== 'function') throw new Error('ProxyPool missing');
+          if (typeof SnapshotManager !== 'function') throw new Error('SnapshotManager missing');
+          if (typeof attachObservability !== 'function') throw new Error('attachObservability missing');
+          if (!newTraceId().match(/^[0-9a-f]{16}$/)) throw new Error('newTraceId format wrong');
+          const bt = new BlackTip({ logLevel: 'error' });
+          const required = ['click', 'clickText', 'type', 'waitForStable', 'waitForText', 'inspect', 'listOptions', 'dismissOverlays', 'pauseForInput', 'didRequestFireSince', 'findInShadowDom', 'download'];
+          for (const m of required) {
+            if (typeof bt[m] !== 'function') throw new Error(`bt.${m} missing`);
+          }
+          console.log('Smoke test OK');
+          EOF
+          node test.mjs
