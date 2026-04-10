@@ -676,4 +676,133 @@ describe('Detector evaluation suite', () => {
       });
     }
   });
+
+  // ── v0.2.0 — fingerprint consistency (L016 regression guard) ──
+  //
+  // The single most important regression check in the suite. If a future
+  // version reintroduces a User-Agent / Sec-Ch-Ua mismatch, this will
+  // fail and we'll catch it before shipping. Akamai Bot Manager and any
+  // serious commercial detector flag the inconsistency as a textbook
+  // spoofing tell. See docs/akamai-bypass.md for the full story.
+
+  it('v0.2.0 — fingerprint consistency (L016 regression guard)', async () => {
+    const start = Date.now();
+    try {
+      const fp = await bt.captureFingerprint();
+      const ok =
+        fp.headers.uaConsistent === true &&
+        fp.headers.uaChromeVersion != null &&
+        fp.headers.secChUaChromeVersion != null &&
+        fp.headers.uaChromeVersion === fp.headers.secChUaChromeVersion &&
+        fp.tls.isChromeLikeJa4 === true &&
+        fp.tls.hasGreaseCipher === true;
+
+      record({
+        detector: 'fingerprint-consistency-L016',
+        ok,
+        durationMs: Date.now() - start,
+        summary: {
+          uaConsistent: fp.headers.uaConsistent,
+          uaChromeVersion: fp.headers.uaChromeVersion,
+          secChUaChromeVersion: fp.headers.secChUaChromeVersion,
+          ja4: fp.tls.ja4,
+          akamaiHttp2: fp.http2.akamaiFingerprint,
+          hasGreaseCipher: fp.tls.hasGreaseCipher,
+          hasGreaseExtension: fp.tls.hasGreaseExtension,
+        },
+      });
+    } catch (err) {
+      record({
+        detector: 'fingerprint-consistency-L016',
+        ok: false,
+        durationMs: Date.now() - start,
+        summary: {},
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  // ── v0.2.0 — IP reputation ──
+  //
+  // Doesn't fail the suite — IP reputation is informational. Any user
+  // running this from a flagged IP (datacenter, abused residential range)
+  // will see the "ok: false" but it's not a BlackTip regression. The
+  // value here is the visibility: the eval baseline records the ASN and
+  // datacenter heuristic so if you switch networks and your detector
+  // pass rate changes, you can correlate.
+
+  it('v0.2.0 — IP reputation (informational)', async () => {
+    const start = Date.now();
+    try {
+      const ip = await bt.checkIpReputation();
+      // We "pass" as long as the call returned data. isDatacenter is
+      // informational, not a failure.
+      record({
+        detector: 'ip-reputation',
+        ok: ip.ip != null && ip.org != null,
+        durationMs: Date.now() - start,
+        summary: {
+          ip: ip.ip,
+          asn: ip.asn,
+          org: ip.org,
+          city: ip.city,
+          country: ip.country,
+          isDatacenter: ip.isDatacenter,
+          isResidential: ip.isResidential,
+          notes: ip.notes,
+        },
+      });
+    } catch (err) {
+      record({
+        detector: 'ip-reputation',
+        ok: false,
+        durationMs: Date.now() - start,
+        summary: {},
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  // ── v0.2.0 — OpenTable Akamai Bot Manager probe ──
+  //
+  // The headline real-world target. v0.1.0 was blocked at the edge with
+  // Akamai's "Access Denied" error page on every URL. v0.2.0 (with the
+  // L016 fix) reaches the actual booking flow. This is THE check that
+  // validates BlackTip's Akamai bypass remains working.
+  //
+  // We hit Gjelina's deep-link booking URL (restRef=76651) which goes
+  // straight to the availability page rather than the homepage. Title
+  // "Access Denied" → fail. Title containing "OpenTable" or "reservation"
+  // → pass.
+
+  it('v0.2.0 — OpenTable Akamai Bot Manager probe', async () => {
+    const start = Date.now();
+    try {
+      const url =
+        'https://www.opentable.com/booking/restref/availability' +
+        '?lang=en-US&restRef=76651&otSource=Restaurant%20website&partySize=2';
+      const result = await bt.testAgainstAkamai(url);
+
+      record({
+        detector: 'opentable-akamai',
+        ok: result.passed,
+        durationMs: result.durationMs,
+        summary: {
+          passed: result.passed,
+          finalUrl: result.finalUrl,
+          title: result.title,
+          akamaiReference: result.akamaiReference,
+          bodyPreview: result.bodyPreview.slice(0, 150),
+        },
+      });
+    } catch (err) {
+      record({
+        detector: 'opentable-akamai',
+        ok: false,
+        durationMs: Date.now() - start,
+        summary: {},
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
 });
